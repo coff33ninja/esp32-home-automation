@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "detailed": {
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    },
+    "simple": {
+      "format": "%(asctime)s - %(levelname)s - %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    },
+    "json": {
+      "format": "%(asctime)s",
+      "class": "pythonjsonlogger.jsonlogger.JsonFormatter"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "level": "INFO",
+      "formatter": "simple",
+      "stream": "ext://sys.stdout"
+    },
+    "file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "DEBUG",
+      "formatter": "detailed",
+      "filename": "volume_control.log",
+      "maxBytes": 10485760,
+      "backupCount": 3,
+      "encoding": "utf8"
+    },
+    "error_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "ERROR",
+      "formatter": "detailed",
+      "filename": "volume_control_errors.log",
+      "maxBytes": 5242880,
+      "backupCount": 2,
+      "encoding": "utf8"
+    },
+    "diagnostic_file": {
+      "class": "logging.handlers.TimedRotatingFileHandler",
+      "level": "INFO",
+      "formatter": "json",
+      "filename": "volume_control_diagnostics.log",
+      "when": "midnight",
+      "interval": 1,
+      "backupCount": 7,
+      "encoding": "utf8"
+    }
+  },
+  "loggers": {
+    "volume_control": {
+      "level": "DEBUG",
+      "handlers": ["console", "file", "error_file"],
+      "propagate": false
+    },
+    "diagnostics": {
+      "level": "INFO",
+      "handlers": ["diagnostic_file"],
+      "propagate": false
+    },
+    "mqtt": {
+      "level": "INFO",
+      "handlers": ["console", "file"],
+      "propagate": false
+    },
+    "system_monitor": {
+      "level": "DEBUG",
+      "handlers": ["console", "file"],
+      "propagate": false
+    }
+  },
+  "root": {
+    "level": "INFO",
+    "handlers": ["console", "file"]
+  }
+}

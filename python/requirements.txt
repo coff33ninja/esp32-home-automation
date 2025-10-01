@@ -1,0 +1,13 @@
+# Core dependencies
+pycaw>=20220416
+paho-mqtt>=2.1.0
+comtypes>=1.1.0
+psutil>=5.9.0
+
+# Optional dependencies for system tray
+pystray>=0.19.5
+pillow>=9.0.0
+
+# Optional dependencies for Windows monitoring
+pywin32>=304
+WMI>=1.5.1

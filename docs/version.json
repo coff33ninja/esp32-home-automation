@@ -1,0 +1,20 @@
+{
+  "version": "1.1.0",
+  "url": "https://your-server.com/firmware/esp32-home-automation-v1.1.0.bin",
+  "checksum": "sha256:abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
+  "size": 1048576,
+  "releaseNotes": "Added OTA update capability, improved LED effects, bug fixes",
+  "mandatory": false,
+  "minVersion": "1.0.0",
+  "changelog": [
+    "Added secure OTA update functionality",
+    "Improved LED matrix effects performance",
+    "Enhanced MQTT command handling",
+    "Fixed memory leak in touch handler",
+    "Added rollback capability for failed updates"
+  ],
+  "compatibility": {
+    "hardware": ["ESP32-DevKit", "ESP32-WROOM"],
+    "features": ["touch_screen", "led_matrix", "ir_remote"]
+  }
+}

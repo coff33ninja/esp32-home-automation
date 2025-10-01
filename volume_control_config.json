@@ -1,0 +1,59 @@
+{
+  "mqtt": {
+    "broker": "192.168.1.xxx",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "client_id": "PCVolumeControl",
+    "keepalive": 60,
+    "qos": 1,
+    "retain": true
+  },
+  "topics": {
+    "volume": "homecontrol/volume",
+    "command": "homecontrol/command",
+    "status": "homecontrol/pc/status",
+    "pc_volume": "homecontrol/pc/volume",
+    "app_volume": "homecontrol/pc/app_volume",
+    "pc_power": "homecontrol/pc/power",
+    "pc_system": "homecontrol/pc/system"
+  },
+  "settings": {
+    "update_rate_limit": 0.1,
+    "sync_interval": 2.0,
+    "reconnect_delay": 5.0,
+    "debug": true,
+    "enable_system_monitoring": true,
+    "enable_tray": true,
+    "monitor_interval": 5,
+    "status_publish_interval": 60,
+    "log_level": "DEBUG",
+    "log_file": "volume_control.log",
+    "max_log_size_mb": 10,
+    "backup_log_count": 3
+  },
+  "apps": {
+    "monitored": [
+      "chrome.exe",
+      "firefox.exe",
+      "spotify.exe",
+      "discord.exe",
+      "vlc.exe",
+      "winamp.exe",
+      "foobar2000.exe"
+    ]
+  },
+  "power_management": {
+    "detect_sleep_wake": true,
+    "notify_esp32_on_sleep": true,
+    "notify_esp32_on_wake": true,
+    "idle_threshold_minutes": 30,
+    "sleep_detection_method": "activity"
+  },
+  "diagnostics": {
+    "enable_performance_monitoring": true,
+    "collect_system_metrics": true,
+    "publish_diagnostics": true,
+    "diagnostic_interval": 300
+  }
+}
