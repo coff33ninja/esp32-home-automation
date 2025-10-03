@@ -1,4 +1,26 @@
-/.kiro
-/.pio
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
+
+# Ignore development and project management folders
+Notion/
+.venv/
+.pio/
+.kiro/
+python/modules/__pycache__/
+python/modules/.mypy_cache/
+python/modules/.pytest_cache/
+python/modules/.vscode/
+python/modules/.idea/
+python/modules/.ropeproject/
+python/modules/.DS_Store
+python/modules/.pytest_cache/
+python/modules/.mypy_cache/
+python/modules/.ipynb_checkpoints/
+python/modules/dist/
+python/modules/build/
+python/modules/*.egg-info/
+python/modules/.eggs/
+python/modules/.tox/
+python/__pycache__/
 /.vscode
-/Notion
+/.github/instructions

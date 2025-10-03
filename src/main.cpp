@@ -30,6 +30,7 @@
 #include "system_monitor.h"
 #include "diagnostic_interface.h"
 #include "ota_updater.h"
+#include "config_manager.h"
 
 // Optional modules (comment out if not using)
 #include "touch_handler.h"
@@ -128,6 +129,10 @@ void setup() {
     DEBUG_PRINTLN("[SETUP] Initializing diagnostic interface...");
     initDiagnosticInterface();
     
+    // Initialize configuration manager
+    DEBUG_PRINTLN("[SETUP] Initializing configuration manager...");
+    initConfigManager();
+    
     // Initialize OTA updater
     DEBUG_PRINTLN("[SETUP] Initializing OTA updater...");
     initOTAUpdater();
@@ -212,6 +217,15 @@ void loop() {
     
     // Handle OTA updates
     handleOTAUpdates();
+    
+    // Handle configuration auto-save
+    static unsigned long lastConfigSave = 0;
+    if (millis() - lastConfigSave >= 30000) { // Auto-save every 30 seconds if changed
+        if (configManager.hasChanged()) {
+            configManager.save();
+        }
+        lastConfigSave = millis();
+    }
     
     // Record heartbeat for fail-safe monitoring
     recordHeartbeat();

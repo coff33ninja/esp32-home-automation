@@ -113,6 +113,10 @@ bool mqttConnect() {
         mqttClient.subscribe(MQTT_TOPIC_OTA_COMMAND);
         DEBUG_PRINTF("[MQTT] Subscribed to: %s\n", MQTT_TOPIC_OTA_COMMAND);
         
+        // Subscribe to configuration command topic
+        mqttClient.subscribe("homecontrol/config/command");
+        DEBUG_PRINTLN("[MQTT] Subscribed to: homecontrol/config/command");
+        
         // Publish Home Assistant discovery messages
         publishHomeAssistantDiscovery();
         
@@ -148,6 +152,20 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         // Handle OTA commands directly
         extern OTAUpdater otaUpdater;
         otaUpdater.handleMQTTCommand(message, "");
+    } else if (strcmp(topic, "homecontrol/config/command") == 0) {
+        // Handle configuration commands
+        extern void handleConfigurationCommands(const String& command, const String& payload);
+        
+        // Parse command and payload
+        String msgStr = String(message);
+        int colonPos = msgStr.indexOf(':');
+        if (colonPos != -1) {
+            String command = msgStr.substring(0, colonPos);
+            String payload = msgStr.substring(colonPos + 1);
+            handleConfigurationCommands(command, payload);
+        } else {
+            handleConfigurationCommands(msgStr, "");
+        }
     }
 }
 
