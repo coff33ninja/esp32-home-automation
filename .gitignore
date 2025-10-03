@@ -1,3 +1,4 @@
+#Ignore vscode AI rules
 .github\instructions\codacy.instructions.md
 
 # Ignore development and project management folders
@@ -21,3 +22,4 @@ python/modules/*.egg-info/
 python/modules/.eggs/
 python/modules/.tox/
 python/__pycache__/
+/.vscode
