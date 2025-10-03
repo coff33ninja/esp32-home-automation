@@ -308,37 +308,90 @@ void OTAUpdater::setState(OTAState state, const String& message) {
 }
 
 void OTAUpdater::showProgressOnMatrix(int progress) {
-    // Show progress bar on LED matrix
+    // Show sophisticated OTA progress on LED matrix
     extern CRGB leds[];
+    extern uint16_t XY(uint8_t x, uint8_t y);
     
     // Clear matrix
     fill_solid(leds, NUM_LEDS, CRGB::Black);
     
-    // Calculate progress bar
-    int totalPixels = MATRIX_WIDTH * MATRIX_HEIGHT;
-    int progressPixels = (progress * totalPixels) / 100;
+    // Create animated progress ring
+    int centerX = MATRIX_WIDTH / 2;
+    int centerY = MATRIX_HEIGHT / 2;
+    int radius = min(MATRIX_WIDTH, MATRIX_HEIGHT) / 2 - 2;
     
-    // Fill progress bar with color gradient
-    for (int i = 0; i < progressPixels; i++) {
-        if (i < totalPixels / 3) {
-            leds[i] = CRGB::Red;      // First third: red
-        } else if (i < (totalPixels * 2) / 3) {
-            leds[i] = CRGB::Yellow;   // Second third: yellow
-        } else {
-            leds[i] = CRGB::Green;    // Final third: green
+    // Calculate progress in degrees (0-360)
+    int progressDegrees = map(progress, 0, 100, 0, 360);
+    
+    // Draw progress ring
+    for (int angle = 0; angle < progressDegrees; angle += 10) {
+        float radians = angle * PI / 180.0;
+        int x = centerX + (radius * cos(radians));
+        int y = centerY + (radius * sin(radians));
+        
+        // Constrain to matrix bounds
+        if (x >= 0 && x < MATRIX_WIDTH && y >= 0 && y < MATRIX_HEIGHT) {
+            // Color based on progress
+            CRGB color;
+            if (progress < 25) {
+                color = CRGB::Red;
+            } else if (progress < 50) {
+                color = CRGB::Orange;
+            } else if (progress < 75) {
+                color = CRGB::Yellow;
+            } else {
+                color = CRGB::Green;
+            }
+            
+            leds[XY(x, y)] = color;
+            
+            // Add inner ring for better visibility
+            if (radius > 3) {
+                int innerX = centerX + ((radius - 2) * cos(radians));
+                int innerY = centerY + ((radius - 2) * sin(radians));
+                if (innerX >= 0 && innerX < MATRIX_WIDTH && innerY >= 0 && innerY < MATRIX_HEIGHT) {
+                    leds[XY(innerX, innerY)] = color;
+                }
+            }
         }
     }
     
+    // Add center indicator
+    if (progress > 0) {
+        leds[XY(centerX, centerY)] = CRGB::White;
+        // Add cross pattern in center
+        if (centerX > 0) leds[XY(centerX - 1, centerY)] = CRGB::White;
+        if (centerX < MATRIX_WIDTH - 1) leds[XY(centerX + 1, centerY)] = CRGB::White;
+        if (centerY > 0) leds[XY(centerX, centerY - 1)] = CRGB::White;
+        if (centerY < MATRIX_HEIGHT - 1) leds[XY(centerX, centerY + 1)] = CRGB::White;
+    }
+    
+    // Add progress percentage as corner indicators
+    int percentLEDs = map(progress, 0, 100, 0, 4);
+    CRGB cornerColor = (progress == 100) ? CRGB::Green : CRGB::Blue;
+    
+    // Light up corners based on progress quarters
+    if (percentLEDs >= 1) leds[XY(0, 0)] = cornerColor;                                    // Top-left
+    if (percentLEDs >= 2) leds[XY(MATRIX_WIDTH - 1, 0)] = cornerColor;                   // Top-right
+    if (percentLEDs >= 3) leds[XY(MATRIX_WIDTH - 1, MATRIX_HEIGHT - 1)] = cornerColor;  // Bottom-right
+    if (percentLEDs >= 4) leds[XY(0, MATRIX_HEIGHT - 1)] = cornerColor;                 // Bottom-left
+    
+    // Add pulsing effect during update
+    static uint8_t pulsePhase = 0;
+    pulsePhase += 10;
+    uint8_t pulseBrightness = 128 + (sin8(pulsePhase) / 4); // Pulse between 128-191
+    
+    FastLED.setBrightness(pulseBrightness);
     FastLED.show();
 }
 
 void OTAUpdater::showProgressOnScreen(int progress, const String& message) {
-    // This would integrate with the touch screen handler
-    // For now, we'll just print to serial
+    // Integrate with touch screen handler to show OTA progress
     DEBUG_PRINTF("[OTA] Progress: %d%% - %s\n", progress, message.c_str());
     
-    // TODO: Integrate with touch_handler to show progress on screen
-    // updateOTAProgressScreen(progress, message);
+    // Call the touch screen OTA progress display function
+    extern void updateOTAProgressScreen(int progress, const String& message);
+    updateOTAProgressScreen(progress, message);
 }
 
 void OTAUpdater::logOTAEvent(const String& event, const String& details) {
@@ -351,6 +404,55 @@ void OTAUpdater::logOTAEvent(const String& event, const String& details) {
     
     // TODO: Store in persistent log for diagnostics
     // addToSystemLog(logEntry);
+}
+
+void OTAUpdater::showUpdateNotification() {
+    DEBUG_PRINTLN("[OTA] Showing update notification");
+    
+    // Show notification on LED matrix
+    extern CRGB leds[];
+    extern uint16_t XY(uint8_t x, uint8_t y);
+    
+    // Pulsing blue notification pattern
+    for (int pulse = 0; pulse < 5; pulse++) {
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
+        
+        // Draw notification icon (exclamation mark)
+        int centerX = MATRIX_WIDTH / 2;
+        
+        // Exclamation mark body
+        for (int y = 2; y < 12; y++) {
+            leds[XY(centerX, y)] = CRGB::Blue;
+            if (centerX > 0) leds[XY(centerX - 1, y)] = CRGB::Blue;
+            if (centerX < MATRIX_WIDTH - 1) leds[XY(centerX + 1, y)] = CRGB::Blue;
+        }
+        
+        // Exclamation mark dot
+        leds[XY(centerX, 13)] = CRGB::Blue;
+        if (centerX > 0) leds[XY(centerX - 1, 13)] = CRGB::Blue;
+        if (centerX < MATRIX_WIDTH - 1) leds[XY(centerX + 1, 13)] = CRGB::Blue;
+        
+        // Add border for visibility
+        for (int x = 0; x < MATRIX_WIDTH; x++) {
+            leds[XY(x, 0)] = CRGB::DarkBlue;
+            leds[XY(x, MATRIX_HEIGHT - 1)] = CRGB::DarkBlue;
+        }
+        for (int y = 0; y < MATRIX_HEIGHT; y++) {
+            leds[XY(0, y)] = CRGB::DarkBlue;
+            leds[XY(MATRIX_WIDTH - 1, y)] = CRGB::DarkBlue;
+        }
+        
+        FastLED.show();
+        delay(500);
+        
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
+        FastLED.show();
+        delay(300);
+    }
+    
+    // Show notification on screen
+    extern void showOTANotificationScreen(const OTAUpdateInfo& info, bool mandatory);
+    showOTANotificationScreen(updateInfo, updateInfo.mandatory);
 }
 
 // ========================================
@@ -401,23 +503,61 @@ bool OTAUpdater::canRollback() {
 bool OTAUpdater::rollbackToPrevious() {
     if (!canRollback()) {
         DEBUG_PRINTLN("[OTA] No previous version available for rollback");
+        setState(OTA_FAILED, "No previous version available for rollback");
         return false;
     }
     
     DEBUG_PRINTLN("[OTA] Rolling back to previous version...");
+    setState(OTA_ROLLBACK_REQUIRED, "Rolling back to previous version");
     logOTAEvent("ROLLBACK_STARTED");
+    
+    // Show rollback screen and LED pattern
+    extern void showOTARollbackScreen();
+    showOTARollbackScreen();
+    
+    // Show rollback pattern on LED matrix
+    extern CRGB leds[];
+    extern uint16_t XY(uint8_t x, uint8_t y);
+    
+    // Animated rollback pattern (spinning arrow)
+    for (int spin = 0; spin < 10; spin++) {
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
+        
+        int centerX = MATRIX_WIDTH / 2;
+        int centerY = MATRIX_HEIGHT / 2;
+        
+        // Draw rotating arrow pattern
+        for (int angle = 0; angle < 360; angle += 45) {
+            float radians = (angle + spin * 36) * PI / 180.0; // Rotate
+            int x = centerX + (4 * cos(radians));
+            int y = centerY + (4 * sin(radians));
+            
+            if (x >= 0 && x < MATRIX_WIDTH && y >= 0 && y < MATRIX_HEIGHT) {
+                leds[XY(x, y)] = CRGB::Orange;
+            }
+        }
+        
+        FastLED.show();
+        delay(200);
+    }
     
     const esp_partition_t* last_invalid = esp_ota_get_last_invalid_partition();
     
     if (esp_ota_set_boot_partition(last_invalid) == ESP_OK) {
         logOTAEvent("ROLLBACK_SUCCESS");
         DEBUG_PRINTLN("[OTA] Rollback successful, restarting...");
+        
+        // Show success pattern
+        fill_solid(leds, NUM_LEDS, CRGB::Green);
+        FastLED.show();
+        
         delay(1000);
         ESP.restart();
         return true;
     } else {
         logOTAEvent("ROLLBACK_FAILED");
         DEBUG_PRINTLN("[OTA] Rollback failed");
+        setState(OTA_FAILED, "Rollback operation failed");
         return false;
     }
 }
@@ -442,9 +582,37 @@ void OTAUpdater::handle() {
         lastVersionCheck = now;
         checkForUpdates();
         
-        // Auto-start update if available and not mandatory
-        if (currentState == OTA_UPDATE_AVAILABLE && !updateInfo.mandatory) {
-            startUpdate();
+        // Handle update availability notification
+        if (currentState == OTA_UPDATE_AVAILABLE) {
+            // Show update notification on screen and LED matrix
+            showUpdateNotification();
+            
+            // Auto-start update if not mandatory (user can cancel)
+            if (!updateInfo.mandatory) {
+                // Wait 10 seconds for user to cancel, then auto-start
+                unsigned long notificationStart = millis();
+                bool userCancelled = false;
+                
+                while (millis() - notificationStart < 10000 && !userCancelled) {
+                    // Check for user input to cancel
+                    extern bool checkForOTACancel();
+                    if (checkForOTACancel()) {
+                        userCancelled = true;
+                        DEBUG_PRINTLN("[OTA] Auto-update cancelled by user");
+                        break;
+                    }
+                    delay(100);
+                }
+                
+                if (!userCancelled) {
+                    DEBUG_PRINTLN("[OTA] Starting auto-update");
+                    startUpdate();
+                }
+            } else {
+                // Mandatory update - start immediately
+                DEBUG_PRINTLN("[OTA] Starting mandatory update");
+                startUpdate();
+            }
         }
     }
     
@@ -469,43 +637,122 @@ void OTAUpdater::handleMQTTCommand(const String& command, const String& payload)
     } else if (command == "start_update") {
         if (currentState == OTA_UPDATE_AVAILABLE) {
             startUpdate();
+        } else {
+            DEBUG_PRINTLN("[OTA] No update available to start");
+            setState(OTA_FAILED, "No update available");
         }
     } else if (command == "cancel_update") {
         cancelUpdate();
     } else if (command == "rollback") {
-        rollbackToPrevious();
+        if (canRollback()) {
+            rollbackToPrevious();
+        } else {
+            DEBUG_PRINTLN("[OTA] Cannot rollback - no previous version");
+            setState(OTA_FAILED, "No previous version for rollback");
+        }
     } else if (command == "set_auto_update") {
         setAutoUpdate(payload == "true" || payload == "1");
     } else if (command == "mark_valid") {
         markCurrentVersionValid();
+    } else if (command == "force_update") {
+        // Force update with custom URL and checksum
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, payload);
+        
+        if (!error) {
+            String url = doc["url"].as<String>();
+            String checksum = doc["checksum"].as<String>();
+            
+            if (url.length() > 0) {
+                DEBUG_PRINTF("[OTA] Force update from: %s\n", url.c_str());
+                startUpdate(url, checksum);
+            }
+        }
+    } else if (command == "get_status") {
+        // Immediately publish current status
+        publishOTAStatus();
+    } else if (command == "test_display") {
+        // Test the progress display functionality
+        DEBUG_PRINTLN("[OTA] Testing progress display");
+        for (int i = 0; i <= 100; i += 10) {
+            showProgressOnMatrix(i);
+            showProgressOnScreen(i, "Testing progress display: " + String(i) + "%");
+            delay(500);
+        }
+        setState(OTA_IDLE, "Display test completed");
+    } else if (command == "factory_reset") {
+        // Prepare for factory reset (clear settings, etc.)
+        DEBUG_PRINTLN("[OTA] Factory reset requested");
+        logOTAEvent("FACTORY_RESET_REQUESTED");
+        
+        // Show warning on screen
+        extern void showFactoryResetWarning();
+        showFactoryResetWarning();
+        
+        // Actual reset would be implemented here
+        // For now, just log the request
     }
 }
 
 void OTAUpdater::publishOTAStatus() {
     if (!mqttClient.connected()) return;
     
-    DynamicJsonDocument doc(512);
+    DynamicJsonDocument doc(1024);
     doc["state"] = getStateString();
     doc["current_version"] = currentVersion;
     doc["progress"] = getProgress();
     doc["auto_update"] = autoUpdateEnabled;
     doc["can_rollback"] = canRollback();
+    doc["last_check"] = lastVersionCheck;
+    doc["retry_count"] = retryCount;
+    
+    // System information
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["uptime"] = millis() / 1000;
+    doc["wifi_rssi"] = WiFi.RSSI();
+    
+    // Partition information
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+        doc["running_partition"] = running->label;
+        doc["partition_size"] = running->size;
+    }
     
     if (currentState == OTA_UPDATE_AVAILABLE) {
-        doc["available_version"] = updateInfo.version;
-        doc["update_size"] = updateInfo.size;
-        doc["mandatory"] = updateInfo.mandatory;
-        doc["release_notes"] = updateInfo.releaseNotes;
+        JsonObject update = doc.createNestedObject("available_update");
+        update["version"] = updateInfo.version;
+        update["size"] = updateInfo.size;
+        update["size_mb"] = updateInfo.size / 1024.0 / 1024.0;
+        update["mandatory"] = updateInfo.mandatory;
+        update["release_notes"] = updateInfo.releaseNotes;
+        update["url"] = updateInfo.url;
+        update["min_version"] = updateInfo.minVersion;
+        
+        // Calculate estimated download time based on size
+        int estimatedSeconds = updateInfo.size / (50 * 1024); // Assume 50KB/s
+        update["estimated_time_seconds"] = estimatedSeconds;
     }
     
     if (currentState == OTA_FAILED) {
         doc["error"] = getLastError();
+        doc["last_error_time"] = millis();
     }
+    
+    // Add capabilities
+    JsonArray capabilities = doc.createNestedArray("capabilities");
+    capabilities.add("version_check");
+    capabilities.add("auto_update");
+    capabilities.add("rollback");
+    capabilities.add("progress_display");
+    capabilities.add("force_update");
+    capabilities.add("checksum_verify");
     
     String statusJson;
     serializeJson(doc, statusJson);
     
     mqttClient.publish(MQTT_TOPIC_OTA_STATUS, statusJson.c_str(), true);
+    
+    DEBUG_PRINTF("[OTA] Published status: %s\n", getStateString().c_str());
 }
 
 // ========================================
@@ -550,20 +797,73 @@ void onOTAStateChange(OTAState state, const String& message) {
     // Handle state-specific actions
     switch (state) {
         case OTA_SUCCESS:
-            // Flash green on LED matrix
+            // Show success pattern on LED matrix
             extern CRGB leds[];
-            fill_solid(leds, NUM_LEDS, CRGB::Green);
-            FastLED.show();
+            extern uint16_t XY(uint8_t x, uint8_t y);
+            
+            // Animated success pattern
+            for (int wave = 0; wave < 3; wave++) {
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+                
+                // Expanding green circle
+                int centerX = MATRIX_WIDTH / 2;
+                int centerY = MATRIX_HEIGHT / 2;
+                
+                for (int radius = 0; radius <= 8; radius++) {
+                    for (int x = 0; x < MATRIX_WIDTH; x++) {
+                        for (int y = 0; y < MATRIX_HEIGHT; y++) {
+                            int dx = x - centerX;
+                            int dy = y - centerY;
+                            int distance = sqrt(dx * dx + dy * dy);
+                            
+                            if (distance == radius) {
+                                leds[XY(x, y)] = CRGB::Green;
+                            }
+                        }
+                    }
+                    FastLED.show();
+                    delay(100);
+                }
+                
+                // Fill with green
+                fill_solid(leds, NUM_LEDS, CRGB::Green);
+                FastLED.show();
+                delay(500);
+            }
+            
+            // Show success screen
+            extern void showOTASuccessScreen();
+            showOTASuccessScreen();
             break;
             
         case OTA_FAILED:
-            // Flash red on LED matrix
+            // Show failure pattern on LED matrix
             extern CRGB leds[];
-            fill_solid(leds, NUM_LEDS, CRGB::Red);
-            FastLED.show();
-            delay(1000);
-            fill_solid(leds, NUM_LEDS, CRGB::Black);
-            FastLED.show();
+            extern uint16_t XY(uint8_t x, uint8_t y);
+            
+            // Flash red X pattern to indicate failure
+            for (int flash = 0; flash < 3; flash++) {
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+                
+                // Draw X pattern
+                for (int i = 0; i < MATRIX_WIDTH; i++) {
+                    if (i < MATRIX_HEIGHT) {
+                        leds[XY(i, i)] = CRGB::Red;                    // Diagonal \
+                        leds[XY(i, MATRIX_HEIGHT - 1 - i)] = CRGB::Red; // Diagonal /
+                    }
+                }
+                
+                FastLED.show();
+                delay(500);
+                
+                fill_solid(leds, NUM_LEDS, CRGB::Black);
+                FastLED.show();
+                delay(300);
+            }
+            
+            // Show failure message on screen
+            extern void showOTAErrorScreen(const String& error);
+            showOTAErrorScreen(otaUpdater.getLastError());
             break;
             
         default:

@@ -82,6 +82,7 @@ private:
     void showProgressOnMatrix(int progress);
     void showProgressOnScreen(int progress, const String& message);
     void logOTAEvent(const String& event, const String& details = "");
+    void showUpdateNotification();
     
 public:
     OTAUpdater();
