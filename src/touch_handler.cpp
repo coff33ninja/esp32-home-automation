@@ -16,6 +16,38 @@ bool touchCalibrated = false;
 uint16_t touchCalibration[8] = {0};
 bool touchScreenInitialized = false;
 
+// Virtual keyboard and toast state (moved here so functions that draw/use them see the symbols)
+static bool keyboardActive = false;
+static char keyboardBufferInternal[128];
+static int keyboardMaxLen = 0;
+static int keyboardCursor = 0;
+static String keyboardTitle = "";
+static bool keyboardConfirmed = false;
+static int keyboardPendingModuleId = -1; // module id waiting for keyboard input
+static bool keyboardShiftUpper = true; // shift = uppercase
+static unsigned long lastBackRepeat = 0;
+static bool lastBackPressed = false;
+
+// Toast state
+static bool toastActive = false;
+static String toastText = "";
+static unsigned long toastStart = 0;
+static unsigned long toastDuration = 2000; // ms
+static bool toastSuccess = true;
+
+// Module configuration UI state (moved up so handlers can reference them)
+static bool inModuleListScreen = false;
+static int moduleListStartY = 40;
+static int moduleListItemHeight = 28;
+static int moduleListScroll = 0;
+static int itemsPerPage = 6; // approximate number of rows that fit
+static bool inModuleDetailsScreen = false;
+static uint8_t currentModuleDetailsId = 0;
+// Confirmation dialog state
+static bool showConfirmDialog = false;
+static String confirmText = "";
+static int confirmAction = 0; // 1 = enable/disable
+
 // Implementations moved from header
 
 bool initTouchScreen() {
@@ -70,6 +102,24 @@ void updateDisplay() {
   case SCREEN_ACTIVE:
     if (now - lastFullUpdate > 500) {
       drawStatusBar();
+      // If keyboard is active, draw it on top
+      if (keyboardActive) drawVirtualKeyboard();
+      // Draw toast if active
+      if (toastActive) {
+        // auto-dismiss after duration
+        if (millis() - toastStart > toastDuration) toastActive = false;
+        else {
+          // draw toast box
+          int w = 260;
+          int x = 30;
+          int y = 190;
+          uint16_t bg = toastSuccess ? COLOR_STATUS_OK : COLOR_STATUS_ERROR;
+          tft.fillRect(x, y, w, 30, bg);
+          tft.setTextColor(COLOR_TEXT);
+          tft.setTextSize(1);
+          tft.drawString(toastText, x + 8, y + 8);
+        }
+      }
       lastFullUpdate = now;
     }
     break;
@@ -107,6 +157,69 @@ bool handleTouch() {
 
   if (currentScreenState == SCREEN_ACTIVE) {
     lastScreenActivity = millis();
+  }
+
+  // If virtual keyboard active, route touches to keyboard handler first
+  if (keyboardActive) {
+    if (touch.pressed || touch.held) {
+      handleKeyboardTouch(touch.x, touch.y, keyboardBufferInternal, sizeof(keyboardBufferInternal));
+      drawVirtualKeyboard();
+      // handle backspace repeat: simple long-press behavior
+      int backX = 150, backY = 100 + 6 * 22, backW = 80, backH = 28;
+      if (isPointInRect(touch.x, touch.y, backX, backY, backW, backH)) {
+        if (!lastBackPressed) {
+          lastBackPressed = true;
+          lastBackRepeat = millis();
+        } else {
+          if (millis() - lastBackRepeat > 400) {
+            // repeat backspace
+            int len = strlen(keyboardBufferInternal);
+            if (len > 0) keyboardBufferInternal[len-1] = '\0';
+            lastBackRepeat = millis() - 200; // slightly faster repeat
+          }
+        }
+      } else {
+        lastBackPressed = false;
+      }
+    }
+    // If keyboard confirmed, process pending module configure
+    if (keyboardConfirmed) {
+      keyboardConfirmed = false;
+      keyboardActive = false;
+      // Process result for module if pending
+      if (keyboardPendingModuleId >= 0) {
+        RegisteredModule* module = getModule((uint8_t)keyboardPendingModuleId);
+        if (module) {
+          String payload = String(keyboardBufferInternal);
+          bool ok = false;
+          if (module->interface.configure) {
+            ok = module->interface.configure(payload);
+          } else {
+            // No per-module configure handler available
+            ok = false;
+          }
+          if (ok) {
+            saveModuleConfiguration();
+            publishModuleStatus();
+            // show success toast
+            toastText = String("Saved: ") + module->config.name;
+            toastSuccess = true;
+            toastStart = millis();
+            toastActive = true;
+          } else {
+            toastText = String("Config failed / unsupported: ") + module->config.name;
+            toastSuccess = false;
+            toastStart = millis();
+            toastActive = true;
+          }
+        }
+      }
+      keyboardPendingModuleId = -1;
+      // redraw current screen
+      if (inModuleDetailsScreen) drawModuleDetails(currentModuleDetailsId);
+      else if (inModuleListScreen) drawModuleList();
+    }
+    return true;
   }
 
   if (currentScreenState == SCREEN_CALIBRATING) {
@@ -318,27 +431,6 @@ void turnOffScreen() {
   }
 }
 
-// Module configuration UI state
-static bool inModuleListScreen = false;
-static int moduleListStartY = 40;
-static int moduleListItemHeight = 28;
-static int moduleListScroll = 0;
-static int itemsPerPage = 6; // approximate number of rows that fit
-static bool inModuleDetailsScreen = false;
-static uint8_t currentModuleDetailsId = 0;
-// Confirmation dialog state
-static bool showConfirmDialog = false;
-static String confirmText = "";
-static int confirmAction = 0; // 1 = enable/disable
-
-// Virtual keyboard state
-static bool keyboardActive = false;
-static char keyboardBufferInternal[128];
-static int keyboardMaxLen = 0;
-static int keyboardCursor = 0;
-static String keyboardTitle = "";
-static bool keyboardConfirmed = false;
-
 // showConfigurationMenu() is provided by src/ui_helpers.cpp and delegates to
 // drawModuleList(). Keep the module list drawing and handlers here.
 
@@ -479,30 +571,21 @@ void handleModuleDetailsTouch(int x, int y) {
     return;
   }
 
-  // Configure button
+  // Configure button (non-blocking keyboard)
   if (isPointInRect(x, y, 115, 200, 90, 30)) {
-    // Launch virtual keyboard to edit configuration string
-    // Use a local buffer and pre-fill with existing configuration if available
-    char buf[128] = {0};
-    String existing = module->interface.getConfiguration ? module->interface.getConfiguration() : String();
-    existing.toCharArray(buf, sizeof(buf));
-    if (showVirtualKeyboard(buf, sizeof(buf), (String("Config: ") + module->config.name).c_str())) {
-      // User confirmed input in buf
-      String payload = String(buf);
-      bool ok = false;
-      if (module->interface.configure) {
-        ok = module->interface.configure(payload);
-      } else {
-        // fallback to generic configureModule helper
-        ok = configureModule(module->config.moduleId, payload);
-      }
-      if (ok) {
-        saveModuleConfiguration();
-        publishModuleStatus();
-      }
+    // Pre-fill keyboard buffer from module's getConfiguration() if available
+    if (module->interface.getConfiguration) {
+      String existing = module->interface.getConfiguration();
+      strncpy(keyboardBufferInternal, existing.c_str(), sizeof(keyboardBufferInternal)-1);
+      keyboardBufferInternal[sizeof(keyboardBufferInternal)-1] = '\0';
+    } else {
+      keyboardBufferInternal[0] = '\0';
     }
-    // Redraw details screen regardless
-    drawModuleDetails(module->config.moduleId);
+    keyboardTitle = String("Config: ") + module->config.name;
+    keyboardPendingModuleId = module->config.moduleId;
+    keyboardActive = true;
+    keyboardConfirmed = false;
+    drawVirtualKeyboard();
     return;
   }
 }
