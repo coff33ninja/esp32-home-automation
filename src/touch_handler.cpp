@@ -331,6 +331,14 @@ static bool showConfirmDialog = false;
 static String confirmText = "";
 static int confirmAction = 0; // 1 = enable/disable
 
+// Virtual keyboard state
+static bool keyboardActive = false;
+static char keyboardBufferInternal[128];
+static int keyboardMaxLen = 0;
+static int keyboardCursor = 0;
+static String keyboardTitle = "";
+static bool keyboardConfirmed = false;
+
 // showConfigurationMenu() is provided by src/ui_helpers.cpp and delegates to
 // drawModuleList(). Keep the module list drawing and handlers here.
 
@@ -402,14 +410,18 @@ void drawModuleDetails(uint8_t moduleId) {
   tft.drawString(String("Detected: ") + (module->config.detected ? "Yes" : "No"), 10, 100);
   tft.drawString(String("Enabled: ") + (module->config.enabled ? "Yes" : "No"), 10, 120);
 
-  // Action buttons
-  tft.fillRect(10, 200, 140, 30, COLOR_BUTTON);
+  // Action buttons: Enable/Disable | Configure | Back
+  tft.fillRect(10, 200, 100, 30, COLOR_BUTTON);
   tft.setTextColor(COLOR_TEXT);
-  tft.drawString(module->config.enabled ? "Disable" : "Enable", 20, 208);
+  tft.drawString(module->config.enabled ? "Disable" : "Enable", 18, 208);
 
-  tft.fillRect(170, 200, 140, 30, COLOR_BUTTON);
+  tft.fillRect(115, 200, 90, 30, COLOR_BUTTON);
   tft.setTextColor(COLOR_TEXT);
-  tft.drawString("Back", 200, 208);
+  tft.drawString("Configure", 125, 208);
+
+  tft.fillRect(220, 200, 80, 30, COLOR_BUTTON);
+  tft.setTextColor(COLOR_TEXT);
+  tft.drawString("Back", 248, 208);
 
   // If confirmation overlay active, draw it
   if (showConfirmDialog) {
@@ -451,14 +463,14 @@ void handleModuleDetailsTouch(int x, int y) {
   }
 
   // Back button
-  if (isPointInRect(x, y, 170, 200, 140, 30)) {
+  if (isPointInRect(x, y, 220, 200, 80, 30)) {
     inModuleDetailsScreen = false;
     drawModuleList();
     return;
   }
 
   // Enable/Disable button
-  if (isPointInRect(x, y, 10, 200, 140, 30)) {
+  if (isPointInRect(x, y, 10, 200, 100, 30)) {
     // Show confirmation dialog
     confirmText = String(module->config.enabled ? "Disable module?" : "Enable module?");
     confirmAction = 1;
@@ -466,6 +478,163 @@ void handleModuleDetailsTouch(int x, int y) {
     drawModuleDetails(module->config.moduleId);
     return;
   }
+
+  // Configure button
+  if (isPointInRect(x, y, 115, 200, 90, 30)) {
+    // Launch virtual keyboard to edit configuration string
+    // Use a local buffer and pre-fill with existing configuration if available
+    char buf[128] = {0};
+    String existing = module->interface.getConfiguration ? module->interface.getConfiguration() : String();
+    existing.toCharArray(buf, sizeof(buf));
+    if (showVirtualKeyboard(buf, sizeof(buf), (String("Config: ") + module->config.name).c_str())) {
+      // User confirmed input in buf
+      String payload = String(buf);
+      bool ok = false;
+      if (module->interface.configure) {
+        ok = module->interface.configure(payload);
+      } else {
+        // fallback to generic configureModule helper
+        ok = configureModule(module->config.moduleId, payload);
+      }
+      if (ok) {
+        saveModuleConfiguration();
+        publishModuleStatus();
+      }
+    }
+    // Redraw details screen regardless
+    drawModuleDetails(module->config.moduleId);
+    return;
+  }
+}
+
+// Very small virtual keyboard implementation
+void drawVirtualKeyboard() {
+  // Draw modal background
+  tft.fillRect(10, 30, 300, 180, COLOR_BUTTON);
+  tft.setTextColor(COLOR_TEXT);
+  tft.setTextSize(2);
+  tft.drawString(keyboardTitle, 20, 36);
+
+  // Draw current buffer
+  tft.setTextSize(1);
+  tft.drawString(String(keyboardBufferInternal), 20, 70);
+
+  // Simple key layout (rows of characters) - very small subset to keep code compact
+  const char* rows[] = {"ABCDEF", "GHIJKL", "MNOPQR", "STUVWX", "YZ0123", "456789"};
+  int startY = 100;
+  for (int r = 0; r < 6; r++) {
+    int startX = 20;
+    for (int c = 0; c < (int)strlen(rows[r]); c++) {
+      char k = rows[r][c];
+      int kx = startX + c * 44;
+      int ky = startY + r * 22;
+      tft.fillRect(kx, ky, 40, 20, 0xFFFF);
+      tft.setTextColor(0x0000);
+      tft.drawString(String(k), kx + 12, ky + 3);
+    }
+  }
+
+  // Special keys: Space, Backspace, Enter, Cancel
+  tft.fillRect(20, 100 + 6 * 22, 120, 28, 0xFFFF);
+  tft.setTextColor(0x0000);
+  tft.drawString("Space", 30, 100 + 6 * 22 + 6);
+
+  tft.fillRect(150, 100 + 6 * 22, 80, 28, 0xFFFF);
+  tft.setTextColor(0x0000);
+  tft.drawString("Back", 170, 100 + 6 * 22 + 6);
+
+  tft.fillRect(240, 100 + 6 * 22, 70, 28, 0x07E0);
+  tft.setTextColor(0x0000);
+  tft.drawString("OK", 270, 100 + 6 * 22 + 6);
+}
+
+void handleKeyboardTouch(int x, int y, char* buffer, int maxLength) {
+  // If user touched OK area
+  int okX = 240, okY = 100 + 6 * 22, okW = 70, okH = 28;
+  if (isPointInRect(x, y, okX, okY, okW, okH)) {
+    keyboardConfirmed = true;
+    keyboardActive = false;
+    return;
+  }
+  // Cancel touches outside modal area - simple heuristic
+  if (!isPointInRect(x, y, 10, 30, 300, 180)) {
+    keyboardActive = false;
+    keyboardConfirmed = false;
+    return;
+  }
+
+  // Space and Back positions
+  int spaceX = 20, spaceY = 100 + 6 * 22, spaceW = 120, spaceH = 28;
+  int backX = 150, backY = spaceY, backW = 80, backH = 28;
+  if (isPointInRect(x, y, spaceX, spaceY, spaceW, spaceH)) {
+    int len = strlen(buffer);
+    if (len + 1 < maxLength) {
+      buffer[len] = ' ';
+      buffer[len+1] = '\0';
+    }
+    return;
+  }
+  if (isPointInRect(x, y, backX, backY, backW, backH)) {
+    int len = strlen(buffer);
+    if (len > 0) buffer[len-1] = '\0';
+    return;
+  }
+
+  // Character keys
+  const char* rows[] = {"ABCDEF", "GHIJKL", "MNOPQR", "STUVWX", "YZ0123", "456789"};
+  int startY = 100;
+  for (int r = 0; r < 6; r++) {
+    for (int c = 0; c < (int)strlen(rows[r]); c++) {
+      int kx = 20 + c * 44;
+      int ky = startY + r * 22;
+      if (isPointInRect(x, y, kx, ky, 40, 20)) {
+        int len = strlen(buffer);
+        if (len + 1 < maxLength) {
+          char ch = rows[r][c];
+          buffer[len] = ch;
+          buffer[len+1] = '\0';
+        }
+        return;
+      }
+    }
+  }
+}
+
+bool showVirtualKeyboard(char* buffer, int maxLength, const char* title) {
+  // Setup
+  keyboardActive = true;
+  keyboardConfirmed = false;
+  keyboardTitle = String(title ? title : "Input");
+  // copy initial content
+  strncpy(keyboardBufferInternal, buffer ? buffer : "", sizeof(keyboardBufferInternal)-1);
+  keyboardBufferInternal[sizeof(keyboardBufferInternal)-1] = '\0';
+
+  // Draw keyboard and loop until user confirms or cancels
+  drawVirtualKeyboard();
+  unsigned long start = millis();
+  while (keyboardActive) {
+    TouchEvent t = readTouch();
+    if (t.pressed) {
+      handleKeyboardTouch(t.x, t.y, keyboardBufferInternal, sizeof(keyboardBufferInternal));
+      // redraw buffer area
+      tft.fillRect(20, 68, 280, 20, COLOR_BUTTON);
+      tft.setTextColor(COLOR_TEXT);
+      tft.setTextSize(1);
+      tft.drawString(String(keyboardBufferInternal), 20, 70);
+    }
+    // small sleep to avoid busy loop
+    delay(50);
+    // optional timeout (2 minutes)
+    if (millis() - start > 120000) { keyboardActive = false; keyboardConfirmed = false; }
+  }
+
+  // Copy out if confirmed
+  if (keyboardConfirmed) {
+    strncpy(buffer, keyboardBufferInternal, maxLength-1);
+    buffer[maxLength-1] = '\0';
+    return true;
+  }
+  return false;
 }
 
 void handleModuleConfigTouch(int x, int y) {
