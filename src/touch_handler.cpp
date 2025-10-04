@@ -529,6 +529,92 @@ void drawModuleDetails(uint8_t moduleId) {
   }
 }
 
+// helper: insert char at cursor
+static void insertCharAtCursor(char* buffer, char ch, int& cursor, int maxLength) {
+  int len = strlen(buffer);
+  if (len + 1 >= maxLength) return;
+  // shift tail
+  for (int i = len; i >= cursor; i--) buffer[i+1] = buffer[i];
+  buffer[cursor] = ch;
+  cursor++;
+}
+
+// helper: remove char before cursor
+static void backspaceAtCursor(char* buffer, int& cursor) {
+  int len = strlen(buffer);
+  if (cursor == 0) return;
+  for (int i = cursor-1; i < len; i++) buffer[i] = buffer[i+1];
+  cursor--;
+}
+
+// Keyboard page: 0 = letters, 1 = lowercase, 2 = symbols
+static int keyboardPage = 0;
+static bool keyboardCursorVisible = true;
+static unsigned long keyboardCursorLastBlink = 0;
+
+void drawVirtualKeyboard() {
+  // Modal background (rounded)
+  tft.fillRoundRect(8, 28, 304, 184, 6, COLOR_BUTTON);
+  tft.setTextColor(COLOR_TEXT);
+  tft.setTextSize(2);
+  tft.drawString(keyboardTitle, 18, 34);
+
+  // Buffer area
+  tft.fillRoundRect(18, 64, 284, 28, 4, 0xFFFF);
+  tft.setTextColor(0x0000);
+  tft.setTextSize(1);
+  tft.drawString(String(keyboardBufferInternal), 24, 70);
+  // cursor blink
+  if (millis() - keyboardCursorLastBlink > 500) {
+    keyboardCursorVisible = !keyboardCursorVisible;
+    keyboardCursorLastBlink = millis();
+  }
+  if (keyboardCursorVisible) {
+    int tx = 24 + tft.textWidth(String(keyboardBufferInternal));
+    tft.fillRect(tx, 70, 2, 12, 0x0000);
+  }
+
+  // Key rows depending on page
+  const char* rows0[] = {"QWERTY", "UIOPAS", "DFGHJK", "LMZXCV", "BNM,.-/", "012345"};
+  const char* rows1[] = {"qwerty", "uiopas", "dfghjk", "lmxzcv", "bnm,.-/", "012345"};
+  const char* rows2[] = {"!@#$%^", "&*()_+", "=:'\"?", "<>[]{}", ";\\|~`", "€£¥•√π"};
+  const char** rows = (keyboardPage == 0) ? rows0 : (keyboardPage == 1 ? rows1 : rows2);
+
+  int startY = 100;
+  for (int r = 0; r < 6; r++) {
+    int startX = 18;
+    const char* row = rows[r];
+    int colCount = strlen(row);
+    for (int c = 0; c < colCount; c++) {
+      char k = row[c];
+      int kx = startX + c * 44;
+      int ky = startY + r * 22;
+      tft.fillRoundRect(kx, ky, 40, 20, 3, 0xFFFF);
+      tft.setTextColor(0x0000);
+      tft.drawString(String(k), kx + 10, ky + 3);
+    }
+  }
+
+  // Bottom row: Shift / Space / Back / Left / Right / OK / Sym
+  int by = 100 + 6 * 22;
+  // Shift
+  tft.fillRoundRect(18, by, 44, 28, 4, keyboardShiftUpper ? 0xFFE0 : 0x7BEF);
+  tft.setTextColor(0x0000); tft.drawString("Shift", 24, by + 6);
+  // Sym
+  tft.fillRoundRect(68, by, 44, 28, 4, keyboardPage==2 ? 0xFFE0 : 0x7BEF);
+  tft.setTextColor(0x0000); tft.drawString("Sym", 76, by + 6);
+  // Left
+  tft.fillRoundRect(118, by, 36, 28, 4, 0xFFFF); tft.setTextColor(0x0000); tft.drawString("<", 130, by + 6);
+  // Space
+  tft.fillRoundRect(158, by, 120, 28, 6, 0xFFFF); tft.setTextColor(0x0000); tft.drawString("Space", 208, by + 6);
+  // Right
+  tft.fillRoundRect(280, by, 24, 28, 4, 0xFFFF); tft.setTextColor(0x0000); tft.drawString(">", 286, by + 6);
+  // Back
+  tft.fillRoundRect(18+220, by-36, 80, 28, 4, 0xFFFF); tft.setTextColor(0x0000); tft.drawString("Back", 230, by - 30);
+  // OK
+  tft.fillRoundRect(260, by, 48, 28, 4, 0x07E0); tft.setTextColor(0x0000); tft.drawString("OK", 276, by + 6);
+}
+
 void handleModuleDetailsTouch(int x, int y) {
   RegisteredModule* module = getModule(currentModuleDetailsId);
   if (!module) return;
@@ -540,6 +626,25 @@ void handleModuleDetailsTouch(int x, int y) {
       if (confirmAction == 1) {
         enableModule(module->config.moduleId, !module->config.enabled);
         publishModuleStatus();
+      } else if (confirmAction == 2) {
+        // fallback configure with current keyboardBufferInternal
+        String payload = String(keyboardBufferInternal);
+        bool ok = false;
+        if (module->interface.configure) ok = module->interface.configure(payload);
+        else ok = configureModule(module->config.moduleId, payload);
+        if (ok) {
+          saveModuleConfiguration();
+          publishModuleStatus();
+          toastText = String("Saved: ") + module->config.name;
+          toastSuccess = true;
+          toastStart = millis();
+          toastActive = true;
+        } else {
+          toastText = String("Config failed: ") + module->config.name;
+          toastSuccess = false;
+          toastStart = millis();
+          toastActive = true;
+        }
       }
       showConfirmDialog = false;
       drawModuleDetails(module->config.moduleId);
@@ -632,93 +737,75 @@ void drawVirtualKeyboard() {
 }
 
 void handleKeyboardTouch(int x, int y, char* buffer, int maxLength) {
-  // If user touched OK area
-  int okX = 240, okY = 100 + 6 * 22, okW = 70, okH = 28;
+  // OK
+  int okX = 260, okY = 100 + 6 * 22, okW = 48, okH = 28;
   if (isPointInRect(x, y, okX, okY, okW, okH)) {
     keyboardConfirmed = true;
     keyboardActive = false;
     return;
   }
-  // Cancel touches outside modal area - simple heuristic
-  if (!isPointInRect(x, y, 10, 30, 300, 180)) {
+
+  // Outside modal -> cancel
+  if (!isPointInRect(x, y, 8, 28, 304, 184)) {
     keyboardActive = false;
     keyboardConfirmed = false;
     return;
   }
 
-  // Space and Back positions
-  int spaceX = 20, spaceY = 100 + 6 * 22, spaceW = 120, spaceH = 28;
-  int backX = 150, backY = spaceY, backW = 80, backH = 28;
-  if (isPointInRect(x, y, spaceX, spaceY, spaceW, spaceH)) {
-    int len = strlen(buffer);
-    if (len + 1 < maxLength) {
-      buffer[len] = ' ';
-      buffer[len+1] = '\0';
-    }
+  int by = 100 + 6 * 22;
+  // Shift
+  if (isPointInRect(x, y, 18, by, 44, 28)) {
+    keyboardShiftUpper = !keyboardShiftUpper;
+    keyboardPage = keyboardShiftUpper ? 0 : 1;
     return;
   }
-  if (isPointInRect(x, y, backX, backY, backW, backH)) {
+  // Sym
+  if (isPointInRect(x, y, 68, by, 44, 28)) {
+    keyboardPage = (keyboardPage == 2) ? (keyboardShiftUpper ? 0 : 1) : 2;
+    return;
+  }
+  // Left
+  if (isPointInRect(x, y, 118, by, 36, 28)) {
+    if (keyboardCursor > 0) keyboardCursor--;
+    return;
+  }
+  // Space
+  if (isPointInRect(x, y, 158, by, 120, 28)) {
+    insertCharAtCursor(buffer, ' ', keyboardCursor, maxLength);
+    return;
+  }
+  // Right
+  if (isPointInRect(x, y, 280, by, 24, 28)) {
     int len = strlen(buffer);
-    if (len > 0) buffer[len-1] = '\0';
+    if (keyboardCursor < len) keyboardCursor++;
+    return;
+  }
+  // Back
+  if (isPointInRect(x, y, 238, by-36, 80, 28)) {
+    backspaceAtCursor(buffer, keyboardCursor);
     return;
   }
 
-  // Character keys
-  const char* rows[] = {"ABCDEF", "GHIJKL", "MNOPQR", "STUVWX", "YZ0123", "456789"};
+  // Character keys (rows per page)
+  const char* rows0[] = {"QWERTY", "UIOPAS", "DFGHJK", "LMZXCV", "BNM,.-/", "012345"};
+  const char* rows1[] = {"qwerty", "uiopas", "dfghjk", "lmxzcv", "bnm,.-/", "012345"};
+  const char* rows2[] = {"!@#$%^", "&*()_+", "=:'\"?", "<>[]{}", ";\\|~`", "€£¥•√π"};
+  const char** rows = (keyboardPage == 0) ? rows0 : (keyboardPage == 1 ? rows1 : rows2);
   int startY = 100;
   for (int r = 0; r < 6; r++) {
-    for (int c = 0; c < (int)strlen(rows[r]); c++) {
-      int kx = 20 + c * 44;
+    int colCount = strlen(rows[r]);
+    for (int c = 0; c < colCount; c++) {
+      int kx = 18 + c * 44;
       int ky = startY + r * 22;
       if (isPointInRect(x, y, kx, ky, 40, 20)) {
-        int len = strlen(buffer);
-        if (len + 1 < maxLength) {
-          char ch = rows[r][c];
-          buffer[len] = ch;
-          buffer[len+1] = '\0';
-        }
+        insertCharAtCursor(buffer, rows[r][c], keyboardCursor, maxLength);
         return;
       }
     }
   }
 }
 
-bool showVirtualKeyboard(char* buffer, int maxLength, const char* title) {
-  // Setup
-  keyboardActive = true;
-  keyboardConfirmed = false;
-  keyboardTitle = String(title ? title : "Input");
-  // copy initial content
-  strncpy(keyboardBufferInternal, buffer ? buffer : "", sizeof(keyboardBufferInternal)-1);
-  keyboardBufferInternal[sizeof(keyboardBufferInternal)-1] = '\0';
-
-  // Draw keyboard and loop until user confirms or cancels
-  drawVirtualKeyboard();
-  unsigned long start = millis();
-  while (keyboardActive) {
-    TouchEvent t = readTouch();
-    if (t.pressed) {
-      handleKeyboardTouch(t.x, t.y, keyboardBufferInternal, sizeof(keyboardBufferInternal));
-      // redraw buffer area
-      tft.fillRect(20, 68, 280, 20, COLOR_BUTTON);
-      tft.setTextColor(COLOR_TEXT);
-      tft.setTextSize(1);
-      tft.drawString(String(keyboardBufferInternal), 20, 70);
-    }
-    // small sleep to avoid busy loop
-    delay(50);
-    // optional timeout (2 minutes)
-    if (millis() - start > 120000) { keyboardActive = false; keyboardConfirmed = false; }
-  }
-
-  // Copy out if confirmed
-  if (keyboardConfirmed) {
-    strncpy(buffer, keyboardBufferInternal, maxLength-1);
-    buffer[maxLength-1] = '\0';
-    return true;
-  }
-  return false;
-}
+// Blocking showVirtualKeyboard removed; keyboard is now non-blocking state machine.
 
 void handleModuleConfigTouch(int x, int y) {
   if (!inModuleListScreen) return;
