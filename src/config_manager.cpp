@@ -686,8 +686,8 @@ void handleConfigurationCommands(const String &command, const String &payload) {
     // Create configuration backup
     configManager.backup();
   } else if (command == "restore_config") {
-    // Restore from backup
-    configManager.restoreFromBackup();
+    // Restore from backup (use public wrapper)
+    configManager.restore();
   } else if (command == "save_config") {
     // Force save current configuration
     configManager.save(true);
