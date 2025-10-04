@@ -31,6 +31,8 @@
 #include "diagnostic_interface.h"
 #include "ota_updater.h"
 #include "config_manager.h"
+#include "hardware_detection.h"
+#include "module_system.h"
 
 // Optional modules (comment out if not using)
 #include "touch_handler.h"
@@ -41,7 +43,8 @@
 // ========================================
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
-CRGB leds[NUM_LEDS];
+// LED array is defined in a single translation unit: src/led_effects_globals.cpp
+extern CRGB leds[NUM_LEDS];
 
 // ========================================
 // GLOBAL VARIABLES
@@ -88,30 +91,45 @@ void setup() {
     DEBUG_PRINTLN("[SETUP] Configuring GPIO pins...");
     setupGPIO();
     
-    // Initialize motor control
-    DEBUG_PRINTLN("[SETUP] Initializing motor control...");
-    initMotorControl();
+    // Initialize hardware detection system
+    DEBUG_PRINTLN("[SETUP] Initializing hardware detection...");
+    initHardwareDetection();
     
-    // Initialize relay control
-    DEBUG_PRINTLN("[SETUP] Initializing relay control...");
-    initRelayControl();
+    // Initialize module system
+    DEBUG_PRINTLN("[SETUP] Initializing module system...");
+    initModuleSystem();
     
-    // Initialize LED strip
-    DEBUG_PRINTLN("[SETUP] Initializing LED strip...");
-    setupLEDs();
+    // Initialize hardware modules based on detection
+    if (isHardwareEnabled(HW_MODULE_MOTOR_CONTROL)) {
+        DEBUG_PRINTLN("[SETUP] Initializing motor control...");
+        initMotorControl();
+    }
     
-    // Initialize LED matrix
-    DEBUG_PRINTLN("[SETUP] Initializing LED matrix...");
-    FastLED.addLeds<MATRIX_TYPE, LED_MATRIX_PIN, COLOR_ORDER>(leds, NUM_LEDS);
-    initLEDEffects();
+    if (isHardwareEnabled(HW_MODULE_RELAY_CONTROL)) {
+        DEBUG_PRINTLN("[SETUP] Initializing relay control...");
+        initRelayControl();
+    }
     
-    // Initialize touch screen
-    DEBUG_PRINTLN("[SETUP] Initializing touch screen...");
-    initTouchScreen();
+    if (isHardwareEnabled(HW_MODULE_LED_STRIP)) {
+        DEBUG_PRINTLN("[SETUP] Initializing LED strip...");
+        setupLEDs();
+    }
     
-    // Initialize IR receiver
-    DEBUG_PRINTLN("[SETUP] Initializing IR receiver...");
-    initIRReceiver();
+    if (isHardwareEnabled(HW_MODULE_LED_MATRIX)) {
+        DEBUG_PRINTLN("[SETUP] Initializing LED matrix...");
+        FastLED.addLeds<MATRIX_TYPE, LED_MATRIX_PIN, COLOR_ORDER>(leds, NUM_LEDS);
+        initLEDEffects();
+    }
+    
+    if (isHardwareEnabled(HW_MODULE_TOUCH_SCREEN)) {
+        DEBUG_PRINTLN("[SETUP] Initializing touch screen...");
+        initTouchScreen();
+    }
+    
+    if (isHardwareEnabled(HW_MODULE_IR_RECEIVER)) {
+        DEBUG_PRINTLN("[SETUP] Initializing IR receiver...");
+        initIRReceiver();
+    }
     
     // Connect to WiFi
     DEBUG_PRINTLN("[SETUP] Connecting to WiFi...");
@@ -162,31 +180,41 @@ void loop() {
         lastPotRead = millis();
     }
     
+    // Update hardware detection and module system
+    updateHardwareDetection();
+    updateModuleSystem();
+    
     // Handle touch input (if enabled)
-    if (handleTouch()) {
-        // Touch was handled by main interface
-    } else {
-        // Check if diagnostic interface should handle touch
-        extern DiagnosticInterfaceState diagInterface;
-        if (diagInterface.active) {
-            // Get touch coordinates (this would need to be implemented)
-            // For now, we'll handle diagnostic touch in the touch handler
+    if (isHardwareEnabled(HW_MODULE_TOUCH_SCREEN)) {
+        if (handleTouch()) {
+            // Touch was handled by main interface
+        } else {
+            // Check if diagnostic interface should handle touch
+            extern DiagnosticInterfaceState diagInterface;
+            if (diagInterface.active) {
+                // Get touch coordinates (this would need to be implemented)
+                // For now, we'll handle diagnostic touch in the touch handler
+            }
+        }
+        
+        // Update display
+        static unsigned long lastDisplayUpdate = 0;
+        if (millis() - lastDisplayUpdate >= 100) { // Update display every 100ms
+            updateDisplay();
+            updateDiagnosticInterface(); // Update diagnostic interface if active
+            lastDisplayUpdate = millis();
         }
     }
     
-    // Update display
-    static unsigned long lastDisplayUpdate = 0;
-    if (millis() - lastDisplayUpdate >= 100) { // Update display every 100ms
-        updateDisplay();
-        updateDiagnosticInterface(); // Update diagnostic interface if active
-        lastDisplayUpdate = millis();
+    // Handle IR commands (if enabled)
+    if (isHardwareEnabled(HW_MODULE_IR_RECEIVER)) {
+        handleIRInput();
     }
     
-    // Handle IR commands (if enabled)
-    handleIRInput();
-    
-    // Update LED effects
-    updateEffects();
+    // Update LED effects (if enabled)
+    if (isHardwareEnabled(HW_MODULE_LED_MATRIX)) {
+        updateEffects();
+    }
     
     // Handle serial diagnostic commands
     static String serialCommand = "";

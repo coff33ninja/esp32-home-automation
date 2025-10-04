@@ -24,3 +24,7 @@ python/modules/.tox/
 python/__pycache__/
 /.vscode
 /.github/instructions
+
+.fake
+/.github
+/.cache
