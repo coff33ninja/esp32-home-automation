@@ -75,14 +75,27 @@ bool OTAUpdater::checkForUpdates() {
     setState(OTA_CHECKING_VERSION, "Checking for updates...");
     
     HTTPClient http;
-    http.begin(OTA_VERSION_CHECK_URL);
+    // Use a secure client when checking HTTPS URLs. We create a temporary
+    // WiFiClientSecure instance for TLS and call setInsecure() so common
+    // Let'sEncrypt/ACME hosts work without pinning. This keeps the change
+    // conservative and avoids adding new external deps.
+    WiFiClient* tlsClient = nullptr;
+    if (String(OTA_VERSION_CHECK_URL).startsWith("https://")) {
+        WiFiClientSecure* c = new WiFiClientSecure();
+        c->setInsecure();
+        http.begin(*c, OTA_VERSION_CHECK_URL);
+        tlsClient = c;
+    } else {
+        http.begin(OTA_VERSION_CHECK_URL);
+    }
     http.setTimeout(OTA_TIMEOUT);
     
     int httpCode = http.GET();
     
     if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        http.end();
+    String payload = http.getString();
+    http.end();
+    if (tlsClient) { delete tlsClient; tlsClient = nullptr; }
         
         // Parse JSON response
         DynamicJsonDocument doc(1024);
@@ -122,6 +135,7 @@ bool OTAUpdater::checkForUpdates() {
         }
     } else {
         http.end();
+        if (tlsClient) { delete tlsClient; tlsClient = nullptr; }
         DEBUG_PRINTF("[OTA] HTTP error: %d\n", httpCode);
         setState(OTA_FAILED, "Failed to check for updates");
         return false;
@@ -181,7 +195,15 @@ void OTAUpdater::cancelUpdate() {
 // ========================================
 bool OTAUpdater::downloadFirmware(const String& url, const String& expectedChecksum) {
     HTTPClient http;
-    http.begin(url);
+    WiFiClient* tlsClient = nullptr;
+    if (url.startsWith("https://")) {
+        WiFiClientSecure* c = new WiFiClientSecure();
+        c->setInsecure();
+        http.begin(*c, url);
+        tlsClient = c;
+    } else {
+        http.begin(url);
+    }
     http.setTimeout(OTA_TIMEOUT);
     
     int httpCode = http.GET();
@@ -246,6 +268,7 @@ bool OTAUpdater::downloadFirmware(const String& url, const String& expectedCheck
     }
     
     http.end();
+    if (tlsClient) { delete tlsClient; tlsClient = nullptr; }
     
     if (written == contentLength) {
         if (Update.end(true)) {

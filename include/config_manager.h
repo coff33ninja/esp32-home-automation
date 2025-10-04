@@ -9,6 +9,7 @@
 #define CONFIG_MANAGER_H
 
 #include <Arduino.h>
+#include <stdint.h>
 #include <EEPROM.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
@@ -155,6 +156,8 @@ public:
     bool reset();
     bool backup();
     bool restore();
+    // Public wrapper that forces a restore from backup (delegates to private method)
+    bool restoreFromBackupPublic() { return restoreFromBackup(); }
     
     // Configuration access
     SystemConfig& getConfig();
